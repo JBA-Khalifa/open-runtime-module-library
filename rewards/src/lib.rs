@@ -1,7 +1,12 @@
+#![allow(clippy::unused_unit)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use codec::{Decode, Encode, FullCodec, HasCompact};
-use frame_support::{decl_module, decl_storage, weights::Weight, Parameter};
+mod default_weight;
+mod mock;
+mod tests;
+
+use codec::{FullCodec, HasCompact};
+use frame_support::pallet_prelude::*;
 use orml_traits::RewardHandler;
 use sp_runtime::{
 	traits::{AtLeast32BitUnsigned, MaybeSerializeDeserialize, Member, Saturating, Zero},
@@ -11,14 +16,6 @@ use sp_std::{
 	cmp::{Eq, PartialEq},
 	fmt::Debug,
 };
-
-mod default_weight;
-mod mock;
-mod tests;
-
-pub trait WeightInfo {
-	fn on_initialize(c: u32) -> Weight;
-}
 
 /// The Reward Pool Info.
 #[derive(Clone, Encode, Decode, PartialEq, Eq, RuntimeDebug, Default)]
@@ -34,70 +31,90 @@ pub struct PoolInfo<Share: HasCompact, Balance: HasCompact> {
 	pub total_withdrawn_rewards: Balance,
 }
 
-pub trait Config: frame_system::Config {
-	/// The share type of pool.
-	type Share: Parameter
-		+ Member
-		+ AtLeast32BitUnsigned
-		+ Default
-		+ Copy
-		+ MaybeSerializeDeserialize
-		+ Debug
-		+ FixedPointOperand;
+pub use module::*;
 
-	/// The reward balance type.
-	type Balance: Parameter
-		+ Member
-		+ AtLeast32BitUnsigned
-		+ Default
-		+ Copy
-		+ MaybeSerializeDeserialize
-		+ Debug
-		+ FixedPointOperand;
+#[frame_support::pallet]
+pub mod module {
+	use super::*;
 
-	/// The reward pool ID type.
-	type PoolId: Parameter + Member + Copy + FullCodec;
-
-	/// The `RewardHandler`
-	type Handler: RewardHandler<
-		Self::AccountId,
-		Self::BlockNumber,
-		Share = Self::Share,
-		Balance = Self::Balance,
-		PoolId = Self::PoolId,
-	>;
-
-	/// Weight information for extrinsics in this module.
-	type WeightInfo: WeightInfo;
-}
-
-decl_storage! {
-	trait Store for Module<T: Config> as Rewards {
-		/// Stores reward pool info.
-		pub Pools get(fn pools): map hasher(twox_64_concat) T::PoolId => PoolInfo<T::Share, T::Balance>;
-
-		/// Record share amount and withdrawn reward amount for specific `AccountId` under `PoolId`.
-		pub ShareAndWithdrawnReward get(fn share_and_withdrawn_reward): double_map hasher(twox_64_concat) T::PoolId, hasher(twox_64_concat) T::AccountId => (T::Share, T::Balance);
+	pub trait WeightInfo {
+		fn on_initialize(c: u32) -> Weight;
 	}
-}
 
-decl_module! {
-	pub struct Module<T: Config> for enum Call where origin: T::Origin {
+	#[pallet::config]
+	pub trait Config: frame_system::Config {
+		/// The share type of pool.
+		type Share: Parameter
+			+ Member
+			+ AtLeast32BitUnsigned
+			+ Default
+			+ Copy
+			+ MaybeSerializeDeserialize
+			+ Debug
+			+ FixedPointOperand;
 
+		/// The reward balance type.
+		type Balance: Parameter
+			+ Member
+			+ AtLeast32BitUnsigned
+			+ Default
+			+ Copy
+			+ MaybeSerializeDeserialize
+			+ Debug
+			+ FixedPointOperand;
+
+		/// The reward pool ID type.
+		type PoolId: Parameter + Member + Copy + FullCodec;
+
+		/// The `RewardHandler`
+		type Handler: RewardHandler<
+			Self::AccountId,
+			Self::BlockNumber,
+			Share = Self::Share,
+			Balance = Self::Balance,
+			PoolId = Self::PoolId,
+		>;
+
+		/// Weight information for extrinsics in this module.
+		type WeightInfo: WeightInfo;
+	}
+
+	/// Stores reward pool info.
+	#[pallet::storage]
+	#[pallet::getter(fn pools)]
+	pub type Pools<T: Config> = StorageMap<_, Twox64Concat, T::PoolId, PoolInfo<T::Share, T::Balance>, ValueQuery>;
+
+	/// Record share amount and withdrawn reward amount for specific `AccountId`
+	/// under `PoolId`.
+	#[pallet::storage]
+	#[pallet::getter(fn share_and_withdrawn_reward)]
+	pub type ShareAndWithdrawnReward<T: Config> =
+		StorageDoubleMap<_, Twox64Concat, T::PoolId, Twox64Concat, T::AccountId, (T::Share, T::Balance), ValueQuery>;
+
+	#[pallet::pallet]
+	pub struct Pallet<T>(PhantomData<T>);
+
+	#[pallet::hooks]
+	impl<T: Config> Hooks<T::BlockNumber> for Pallet<T> {
 		fn on_initialize(now: T::BlockNumber) -> Weight {
 			let mut count = 0;
-			T::Handler::accumulate_reward(now, | pool, reward_to_accumulate | {
+			T::Handler::accumulate_reward(now, |pool, reward_to_accumulate| {
 				if !reward_to_accumulate.is_zero() {
 					count += 1;
-					Pools::<T>::mutate(pool, | pool_info | pool_info.total_rewards = pool_info.total_rewards.saturating_add(reward_to_accumulate));
+					Pools::<T>::mutate(pool, |pool_info| {
+						pool_info.total_rewards = pool_info.total_rewards.saturating_add(reward_to_accumulate)
+					});
 				}
 			});
 			T::WeightInfo::on_initialize(count)
 		}
 	}
+
+	#[pallet::call]
+	impl<T: Config> Pallet<T> {}
 }
 
-impl<T: Config> Module<T> {
+impl<T: Config> Pallet<T> {
 	pub fn add_share(who: &T::AccountId, pool: T::PoolId, add_amount: T::Share) {
 		if add_amount.is_zero() {
 			return;

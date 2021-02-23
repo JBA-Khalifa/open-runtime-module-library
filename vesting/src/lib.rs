@@ -25,15 +25,16 @@
 //!   account, `root` origin required.
 
 #![cfg_attr(not(feature = "std"), no_std)]
+#![allow(clippy::unused_unit)]
 
-use codec::{Decode, Encode, HasCompact};
+use codec::HasCompact;
 use frame_support::{
-	decl_error, decl_event, decl_module, decl_storage, ensure,
+	ensure,
+	pallet_prelude::*,
 	traits::{Currency, EnsureOrigin, ExistenceRequirement, Get, LockIdentifier, LockableCurrency, WithdrawReasons},
 	transactional,
-	weights::Weight,
 };
-use frame_system::{ensure_root, ensure_signed};
+use frame_system::{ensure_root, ensure_signed, pallet_prelude::*};
 use sp_runtime::{
 	traits::{AtLeast32Bit, CheckedAdd, Saturating, StaticLookup, Zero},
 	DispatchResult, RuntimeDebug,
@@ -47,19 +48,17 @@ mod default_weight;
 mod mock;
 mod tests;
 
-pub trait WeightInfo {
-	fn vested_transfer() -> Weight;
-	fn claim(i: u32) -> Weight;
-	fn update_vesting_schedules(i: u32) -> Weight;
-}
+pub use module::*;
 
 /// The maximum number of vesting schedules an account can have.
 pub const MAX_VESTINGS: usize = 20;
 
+pub const VESTING_LOCK_ID: LockIdentifier = *b"ormlvest";
+
 /// The vesting schedule.
 ///
-/// Benefits would be granted gradually, `per_period` amount every `period` of
-/// blocks after `start`.
+/// Benefits would be granted gradually, `per_period` amount every `period`
+/// of blocks after `start`.
 #[derive(Clone, Encode, Decode, PartialEq, Eq, RuntimeDebug)]
 pub struct VestingSchedule<BlockNumber, Balance: HasCompact> {
 	/// Vesting starting block
@@ -106,68 +105,46 @@ impl<BlockNumber: AtLeast32Bit + Copy, Balance: AtLeast32Bit + Copy> VestingSche
 	}
 }
 
-pub type BalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
-pub type VestingScheduleOf<T> = VestingSchedule<<T as frame_system::Config>::BlockNumber, BalanceOf<T>>;
-pub type ScheduledItem<T> = (
-	<T as frame_system::Config>::AccountId,
-	<T as frame_system::Config>::BlockNumber,
-	<T as frame_system::Config>::BlockNumber,
-	u32,
-	BalanceOf<T>,
-);
+#[frame_support::pallet]
+pub mod module {
+	use super::*;
 
-pub trait Config: frame_system::Config {
-	type Event: From<Event<Self>> + Into<<Self as frame_system::Config>::Event>;
-	type Currency: LockableCurrency<Self::AccountId, Moment = Self::BlockNumber>;
-
-	/// The minimum amount transferred to call `vested_transfer`.
-	type MinVestedTransfer: Get<BalanceOf<Self>>;
-
-	/// Required origin for vested transfer.
-	type VestedTransferOrigin: EnsureOrigin<Self::Origin, Success = Self::AccountId>;
-
-	/// Weight information for extrinsics in this module.
-	type WeightInfo: WeightInfo;
-}
-
-decl_storage! {
-	trait Store for Module<T: Config> as Vesting {
-		/// Vesting schedules of an account.
-		pub VestingSchedules get(fn vesting_schedules) build(|config: &GenesisConfig<T>| {
-			config.vesting.iter()
-				.map(|&(ref who, start, period, period_count, per_period)| {
-					let total = per_period * Into::<BalanceOf<T>>::into(period_count);
-					assert!(T::Currency::free_balance(who) >= total, "Account do not have enough balance");
-					T::Currency::set_lock(VESTING_LOCK_ID, who, total, WithdrawReasons::all());
-					(who.clone(), vec![VestingSchedule {start, period, period_count, per_period}])
-				})
-				.collect::<Vec<_>>()
-		}): map hasher(blake2_128_concat) T::AccountId => Vec<VestingScheduleOf<T>>;
+	pub trait WeightInfo {
+		fn vested_transfer() -> Weight;
+		fn claim(i: u32) -> Weight;
+		fn update_vesting_schedules(i: u32) -> Weight;
 	}
 
-	add_extra_genesis {
-		config(vesting): Vec<ScheduledItem<T>>;
-	}
-}
-
-decl_event!(
-	pub enum Event<T> where
+	pub(crate) type BalanceOf<T> =
+		<<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
+	pub(crate) type VestingScheduleOf<T> = VestingSchedule<<T as frame_system::Config>::BlockNumber, BalanceOf<T>>;
+	pub type ScheduledItem<T> = (
 		<T as frame_system::Config>::AccountId,
-		Balance = BalanceOf<T>,
-		VestingSchedule = VestingScheduleOf<T>
-	{
-		/// Added new vesting schedule. [from, to, vesting_schedule]
-		VestingScheduleAdded(AccountId, AccountId, VestingSchedule),
-		/// Claimed vesting. [who, locked_amount]
-		Claimed(AccountId, Balance),
-		/// Updated vesting schedules. [who]
-		VestingSchedulesUpdated(AccountId),
-	}
-);
+		<T as frame_system::Config>::BlockNumber,
+		<T as frame_system::Config>::BlockNumber,
+		u32,
+		BalanceOf<T>,
+	);
 
-decl_error! {
-	/// Error for vesting module.
-	pub enum Error for Module<T: Config> {
+	#[pallet::config]
+	pub trait Config: frame_system::Config {
+		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
+
+		type Currency: LockableCurrency<Self::AccountId, Moment = Self::BlockNumber>;
+
+		#[pallet::constant]
+		/// The minimum amount transferred to call `vested_transfer`.
+		type MinVestedTransfer: Get<BalanceOf<Self>>;
+
+		/// Required origin for vested transfer.
+		type VestedTransferOrigin: EnsureOrigin<Self::Origin, Success = Self::AccountId>;
+
+		/// Weight information for extrinsics in this module.
+		type WeightInfo: WeightInfo;
+	}
+
+	#[pallet::error]
+	pub enum Error<T> {
 		/// Vesting period is zero
 		ZeroVestingPeriod,
 		/// Number of vests is zero
@@ -181,85 +158,113 @@ decl_error! {
 		/// The vested transfer amount is too low
 		AmountLow,
 	}
-}
 
-decl_module! {
-	pub struct Module<T: Config> for enum Call where origin: T::Origin {
-		type Error = Error<T>;
+	#[pallet::event]
+	#[pallet::generate_deposit(fn deposit_event)]
+	pub enum Event<T: Config> {
+		/// Added new vesting schedule. [from, to, vesting_schedule]
+		VestingScheduleAdded(T::AccountId, T::AccountId, VestingScheduleOf<T>),
+		/// Claimed vesting. [who, locked_amount]
+		Claimed(T::AccountId, BalanceOf<T>),
+		/// Updated vesting schedules. [who]
+		VestingSchedulesUpdated(T::AccountId),
+	}
 
-		/// The minimum amount to be transferred to create a new vesting schedule.
-		const MinVestedTransfer: BalanceOf<T> = T::MinVestedTransfer::get();
+	/// Vesting schedules of an account.
+	#[pallet::storage]
+	#[pallet::getter(fn vesting_schedules)]
+	pub type VestingSchedules<T: Config> =
+		StorageMap<_, Blake2_128Concat, T::AccountId, Vec<VestingScheduleOf<T>>, ValueQuery>;
 
-		fn deposit_event() = default;
+	#[pallet::genesis_config]
+	pub struct GenesisConfig<T: Config> {
+		pub vesting: Vec<ScheduledItem<T>>,
+	}
 
-		/// # <weight>
-		/// - Preconditions:
-		/// 	- T::Currency is orml_currencies
-		/// - Complexity: `O(1)`
-		/// - Db reads: 3
-		/// - Db writes: 3
-		/// -------------------
-		/// Base Weight: 65.23 µs
-		/// # </weight>
+	#[cfg(feature = "std")]
+	impl<T: Config> Default for GenesisConfig<T> {
+		fn default() -> Self {
+			GenesisConfig { vesting: vec![] }
+		}
+	}
+
+	#[pallet::genesis_build]
+	impl<T: Config> GenesisBuild<T> for GenesisConfig<T> {
+		fn build(&self) {
+			self.vesting
+				.iter()
+				.for_each(|(who, start, period, period_count, per_period)| {
+					let total = *per_period * Into::<BalanceOf<T>>::into(*period_count);
+
+					assert!(
+						T::Currency::free_balance(who) >= total,
+						"Account do not have enough balance"
+					);
+
+					T::Currency::set_lock(VESTING_LOCK_ID, who, total, WithdrawReasons::all());
+					VestingSchedules::<T>::insert(
+						who,
+						vec![VestingSchedule {
+							start: *start,
+							period: *period,
+							period_count: *period_count,
+							per_period: *per_period,
+						}],
+					);
+				});
+		}
+	}
+
+	#[pallet::pallet]
+	pub struct Pallet<T>(PhantomData<T>);
+
+	#[pallet::hooks]
+	impl<T: Config> Hooks<T::BlockNumber> for Pallet<T> {}
+
+	#[pallet::call]
+	impl<T: Config> Pallet<T> {
 		// can not get VestingSchedule count from `who`, so use `MAX_VESTINGS / 2`
-		#[weight = T::WeightInfo::claim((MAX_VESTINGS / 2) as u32)]
-		pub fn claim(origin) {
+		#[pallet::weight(T::WeightInfo::claim((MAX_VESTINGS / 2) as u32))]
+		pub fn claim(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
 			let locked_amount = Self::do_claim(&who);
 
-			Self::deposit_event(RawEvent::Claimed(who, locked_amount));
+			Self::deposit_event(Event::Claimed(who, locked_amount));
+			Ok(().into())
 		}
 
-		/// # <weight>
-		/// - Preconditions:
-		/// 	- T::Currency is orml_currencies
-		/// - Complexity: `O(1)`
-		/// - Db reads: 4
-		/// - Db writes: 4
-		/// -------------------
-		/// Base Weight: 150.4 µs
-		/// # </weight>
-		#[weight = T::WeightInfo::vested_transfer()]
+		#[pallet::weight(T::WeightInfo::vested_transfer())]
 		pub fn vested_transfer(
-			origin,
+			origin: OriginFor<T>,
 			dest: <T::Lookup as StaticLookup>::Source,
 			schedule: VestingScheduleOf<T>,
-		) {
+		) -> DispatchResultWithPostInfo {
 			let from = T::VestedTransferOrigin::ensure_origin(origin)?;
 			let to = T::Lookup::lookup(dest)?;
 			Self::do_vested_transfer(&from, &to, schedule.clone())?;
 
-			Self::deposit_event(RawEvent::VestingScheduleAdded(from, to, schedule));
+			Self::deposit_event(Event::VestingScheduleAdded(from, to, schedule));
+			Ok(().into())
 		}
 
-		/// # <weight>
-		/// - Preconditions:
-		/// 	- T::Currency is orml_currencies
-		/// - Complexity: `O(1)`
-		/// - Db reads: 2
-		/// - Db writes: 3
-		/// -------------------
-		/// Base Weight: 61.87 µs
-		/// # </weight>
-		#[weight = T::WeightInfo::update_vesting_schedules(vesting_schedules.len() as u32)]
+		#[pallet::weight(T::WeightInfo::update_vesting_schedules(vesting_schedules.len() as u32))]
 		pub fn update_vesting_schedules(
-			origin,
+			origin: OriginFor<T>,
 			who: <T::Lookup as StaticLookup>::Source,
-			vesting_schedules: Vec<VestingScheduleOf<T>>
-		) {
+			vesting_schedules: Vec<VestingScheduleOf<T>>,
+		) -> DispatchResultWithPostInfo {
 			ensure_root(origin)?;
 
 			let account = T::Lookup::lookup(who)?;
 			Self::do_update_vesting_schedules(&account, vesting_schedules)?;
 
-			Self::deposit_event(RawEvent::VestingSchedulesUpdated(account));
+			Self::deposit_event(Event::VestingSchedulesUpdated(account));
+			Ok(().into())
 		}
 	}
 }
 
-const VESTING_LOCK_ID: LockIdentifier = *b"ormlvest";
-
-impl<T: Config> Module<T> {
+impl<T: Config> Pallet<T> {
 	fn do_claim(who: &T::AccountId) -> BalanceOf<T> {
 		let locked = Self::locked_balance(who);
 		if locked.is_zero() {

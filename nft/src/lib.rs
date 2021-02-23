@@ -19,11 +19,12 @@
 //! - `destroy_class` - Destroy NFT(non fungible token) class
 
 #![cfg_attr(not(feature = "std"), no_std)]
+#![allow(clippy::unused_unit)]
 
 use codec::{Decode, Encode};
-use frame_support::{decl_error, decl_module, decl_storage, ensure, Parameter};
+use frame_support::{ensure, pallet_prelude::*, Parameter};
 use sp_runtime::{
-	traits::{AtLeast32BitUnsigned, CheckedAdd, CheckedSub, Member, One, Zero},
+	traits::{AtLeast32BitUnsigned, CheckedAdd, CheckedSub, MaybeSerializeDeserialize, Member, One, Zero},
 	DispatchError, DispatchResult, RuntimeDebug,
 };
 use sp_std::vec::Vec;
@@ -55,20 +56,43 @@ pub struct TokenInfo<AccountId, Data> {
 	pub data: Data,
 }
 
-pub trait Config: frame_system::Config {
-	/// The class ID type
-	type ClassId: Parameter + Member + AtLeast32BitUnsigned + Default + Copy;
-	/// The token ID type
-	type TokenId: Parameter + Member + AtLeast32BitUnsigned + Default + Copy;
-	/// The class properties type
-	type ClassData: Parameter + Member;
-	/// The token properties type
-	type TokenData: Parameter + Member;
-}
+pub use module::*;
 
-decl_error! {
+#[frame_support::pallet]
+pub mod module {
+	use super::*;
+
+	#[pallet::config]
+	pub trait Config: frame_system::Config {
+		/// The class ID type
+		type ClassId: Parameter + Member + AtLeast32BitUnsigned + Default + Copy;
+		/// The token ID type
+		type TokenId: Parameter + Member + AtLeast32BitUnsigned + Default + Copy;
+		/// The class properties type
+		type ClassData: Parameter + Member + MaybeSerializeDeserialize;
+		/// The token properties type
+		type TokenData: Parameter + Member + MaybeSerializeDeserialize;
+	}
+
+	pub type ClassInfoOf<T> =
+		ClassInfo<<T as Config>::TokenId, <T as frame_system::Config>::AccountId, <T as Config>::ClassData>;
+	pub type TokenInfoOf<T> = TokenInfo<<T as frame_system::Config>::AccountId, <T as Config>::TokenData>;
+
+	pub type GenesisTokenData<T> = (
+		<T as frame_system::Config>::AccountId, // Token owner
+		Vec<u8>,                                // Token metadata
+		<T as Config>::TokenData,
+	);
+	pub type GenesisTokens<T> = (
+		<T as frame_system::Config>::AccountId, // Token class owner
+		Vec<u8>,                                // Token class metadata
+		<T as Config>::ClassData,
+		Vec<GenesisTokenData<T>>, // Vector of tokens belonging to this class
+	);
+
 	/// Error for non-fungible-token module.
-	pub enum Error for Module<T: Config> {
+	#[pallet::error]
+	pub enum Error<T> {
 		/// No available class ID
 		NoAvailableClassId,
 		/// No available token ID
@@ -85,38 +109,78 @@ decl_error! {
 		/// Total issuance is not 0
 		CannotDestroyClass,
 	}
-}
 
-pub type ClassInfoOf<T> =
-	ClassInfo<<T as Config>::TokenId, <T as frame_system::Config>::AccountId, <T as Config>::ClassData>;
-pub type TokenInfoOf<T> = TokenInfo<<T as frame_system::Config>::AccountId, <T as Config>::TokenData>;
+	/// Next available class ID.
+	#[pallet::storage]
+	#[pallet::getter(fn next_class_id)]
+	pub type NextClassId<T: Config> = StorageValue<_, T::ClassId, ValueQuery>;
 
-decl_storage! {
-	trait Store for Module<T: Config> as NonFungibleToken {
-		/// Next available class ID.
-		pub NextClassId get(fn next_class_id): T::ClassId;
-		/// Next available token ID.
-		pub NextTokenId get(fn next_token_id): map hasher(twox_64_concat) T::ClassId => T::TokenId;
-		/// Store class info.
-		///
-		/// Returns `None` if class info not set or removed.
-		pub Classes get(fn classes): map hasher(twox_64_concat) T::ClassId => Option<ClassInfoOf<T>>;
-		/// Store token info.
-		///
-		/// Returns `None` if token info not set or removed.
-		pub Tokens get(fn tokens): double_map hasher(twox_64_concat) T::ClassId, hasher(twox_64_concat) T::TokenId => Option<TokenInfoOf<T>>;
-		/// Token existence check by owner and class ID.
-		#[cfg(not(feature = "disable-tokens-by-owner"))]
-		pub TokensByOwner get(fn tokens_by_owner): double_map hasher(twox_64_concat) T::AccountId, hasher(twox_64_concat) (T::ClassId, T::TokenId) => Option<()>;
+	/// Next available token ID.
+	#[pallet::storage]
+	#[pallet::getter(fn next_token_id)]
+	pub type NextTokenId<T: Config> = StorageMap<_, Twox64Concat, T::ClassId, T::TokenId, ValueQuery>;
+
+	/// Store class info.
+	///
+	/// Returns `None` if class info not set or removed.
+	#[pallet::storage]
+	#[pallet::getter(fn classes)]
+	pub type Classes<T: Config> = StorageMap<_, Twox64Concat, T::ClassId, ClassInfoOf<T>>;
+
+	/// Store token info.
+	///
+	/// Returns `None` if token info not set or removed.
+	#[pallet::storage]
+	#[pallet::getter(fn tokens)]
+	pub type Tokens<T: Config> =
+		StorageDoubleMap<_, Twox64Concat, T::ClassId, Twox64Concat, T::TokenId, TokenInfoOf<T>>;
+
+	/// Token existence check by owner and class ID.
+	// TODO: pallet macro doesn't support conditional compiling. Always having `TokensByOwner` storage doesn't hurt but
+	// it could be removed once conditional compiling supported.
+	// #[cfg(not(feature = "disable-tokens-by-owner"))]
+	#[pallet::storage]
+	#[pallet::getter(fn tokens_by_owner)]
+	pub type TokensByOwner<T: Config> =
+		StorageDoubleMap<_, Twox64Concat, T::AccountId, Twox64Concat, (T::ClassId, T::TokenId), (), ValueQuery>;
+
+	#[pallet::genesis_config]
+	pub struct GenesisConfig<T: Config> {
+		pub tokens: Vec<GenesisTokens<T>>,
 	}
-}
 
-decl_module! {
-	pub struct Module<T: Config> for enum Call where origin: T::Origin {
+	#[cfg(feature = "std")]
+	impl<T: Config> Default for GenesisConfig<T> {
+		fn default() -> Self {
+			GenesisConfig { tokens: vec![] }
+		}
 	}
+
+	#[pallet::genesis_build]
+	impl<T: Config> GenesisBuild<T> for GenesisConfig<T> {
+		fn build(&self) {
+			self.tokens.iter().for_each(|token_class| {
+				let class_id = Pallet::<T>::create_class(&token_class.0, token_class.1.to_vec(), token_class.2.clone())
+					.expect("Create class cannot fail while building genesis");
+				for (account_id, token_metadata, token_data) in &token_class.3 {
+					Pallet::<T>::mint(&account_id, class_id, token_metadata.to_vec(), token_data.clone())
+						.expect("Token mint cannot fail during genesis");
+				}
+			})
+		}
+	}
+
+	#[pallet::pallet]
+	pub struct Pallet<T>(PhantomData<T>);
+
+	#[pallet::hooks]
+	impl<T: Config> Hooks<T::BlockNumber> for Pallet<T> {}
+
+	#[pallet::call]
+	impl<T: Config> Pallet<T> {}
 }
 
-impl<T: Config> Module<T> {
+impl<T: Config> Pallet<T> {
 	/// Create NFT(non fungible token) class
 	pub fn create_class(
 		owner: &T::AccountId,

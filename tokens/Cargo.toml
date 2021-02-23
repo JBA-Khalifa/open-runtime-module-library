@@ -3,31 +3,26 @@ name = "orml-tokens"
 description = "Fungible tokens module that implements `MultiCurrency` trait."
 repository = "https://github.com/open-web3-stack/open-runtime-module-library/tree/master/tokens"
 license = "Apache-2.0"
-version = "0.3.3-dev"
+version = "0.4.1-dev"
 authors = ["Laminar Developers <hello@laminar.one>"]
 edition = "2018"
 
 [dependencies]
 serde = { version = "1.0.111", optional = true }
-codec = { package = "parity-scale-codec", version = "1.3.0", default-features = false }
-sp-runtime = { version = "2.0.0", default-features = false }
-sp-io = { version = "2.0.0", default-features = false }
-sp-std = { version = "2.0.0", default-features = false }
+codec = { package = "parity-scale-codec", version = "2.0.0", default-features = false }
+sp-runtime = { version = "3.0.0", default-features = false }
+sp-std = { version = "3.0.0", default-features = false }
+frame-support = { version = "3.0.0", default-features = false }
+frame-system = { version = "3.0.0", default-features = false }
+orml-traits = { path = "../traits", version = "0.4.1-dev", default-features = false }
 
-frame-support = { version = "2.0.0", default-features = false }
-frame-system = { version = "2.0.0", default-features = false }
-
-orml-traits = { path = "../traits", version = "0.3.3-dev", default-features = false }
+funty = { version = "=1.1.0", default-features = false } # https://github.com/bitvecto-rs/bitvec/issues/105
 
 [dev-dependencies]
-sp-core = { version = "2.0.0", default-features = false }
-pallet-treasury = { version = "2.0.0" }
-#TODO: use cargo version once `bounties` and `tips` pallets are released.
-pallet-bounties = { git = "https://github.com/paritytech/substrate.git", rev = "987a9723920217917f2708388d150add5ef52ef7" }
-pallet-tips = { git = "https://github.com/paritytech/substrate.git", rev = "987a9723920217917f2708388d150add5ef52ef7" }
-pallet-elections-phragmen = { version = "2.0.0" }
-
-clear_on_drop = { version = "0.2.4", features = ["no_cc"] }	# https://github.com/paritytech/substrate/issues/4179
+sp-core = "3.0.0"
+sp-io = "3.0.0"
+pallet-treasury = "3.0.0"
+pallet-elections-phragmen = "3.0.0"
 
 [features]
 default = ["std"]
@@ -36,7 +31,6 @@ std = [
 	"codec/std",
 	"sp-runtime/std",
 	"sp-std/std",
-	"sp-io/std",
 	"frame-support/std",
 	"frame-system/std",
 	"orml-traits/std",

@@ -47,7 +47,11 @@ ORML use `Cargo.dev.toml` to avoid workspace conflicts with project cargo config
 - `make Cargo.toml`, or
 - change the command to `make dev-check` etc which does the copy. (For the full list of `make` commands, check `Makefile`)
 
+# Web3 Foundation Grant Project
+ORML is part of the bigger `Open-Web3-Stack` initiative, that is currently under a General Grant from Web3 Foundation. See Application details [here](https://github.com/open-web3-stack/General-Grants-Program/blob/master/grants/speculative/open_web3_stack.md). The 1st milestone has been delivered. 
+
 # Projects using ORML
+- [If you intend or are using ORML, please_add your project here_](https://github.com/open-web3-stack/open-runtime-module-library/edit/master/README.md)
 
 _In alphabetical order_
 
@@ -56,4 +60,4 @@ _In alphabetical order_
 - [ChainX](https://github.com/chainx-org/ChainX)
 - [HydraDX](https://github.com/galacticcouncil/hack.HydraDX-node)
 - [Laminar Chain](https://github.com/laminar-protocol/laminar-chain)
-- [_Add your project here_](https://github.com/open-web3-stack/open-runtime-module-library/edit/master/README.md)
+- [Setheum Network](https://github.com/Setheum-Labs/Setheum)

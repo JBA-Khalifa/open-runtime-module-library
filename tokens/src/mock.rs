@@ -2,21 +2,15 @@
 
 #![cfg(test)]
 
+use super::*;
 use frame_support::{
-	impl_outer_event, impl_outer_origin, parameter_types,
+	construct_runtime, parameter_types,
 	traits::{ChangeMembers, Contains, ContainsLengthBound, SaturatingCurrencyToVote},
 };
-use frame_system as system;
 use orml_traits::parameter_type_with_key;
 use sp_core::H256;
-use sp_runtime::{
-	testing::Header,
-	traits::{AccountIdConversion, IdentityLookup},
-	AccountId32, ModuleId, Percent, Permill,
-};
+use sp_runtime::{testing::Header, traits::IdentityLookup, AccountId32, Permill};
 use sp_std::cell::RefCell;
-
-use super::*;
 
 pub type AccountId = AccountId32;
 pub type CurrencyId = u32;
@@ -31,35 +25,15 @@ pub const TREASURY_ACCOUNT: AccountId = AccountId32::new([2u8; 32]);
 pub const ID_1: LockIdentifier = *b"1       ";
 pub const ID_2: LockIdentifier = *b"2       ";
 
-impl_outer_origin! {
-	pub enum Origin for Runtime {}
-}
+use crate as tokens;
 
-mod tokens {
-	pub use crate::Event;
-}
-
-impl_outer_event! {
-	pub enum TestEvent for Runtime {
-		frame_system<T>,
-		tokens<T>,
-		pallet_treasury<T>,
-		pallet_bounties<T>,
-		pallet_tips<T>,
-		pallet_elections_phragmen<T>,
-	}
-}
-
-// Workaround for https://github.com/rust-lang/rust/issues/26925 . Remove when sorted.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct Runtime;
 parameter_types! {
 	pub const BlockHashCount: u64 = 250;
 }
 
 impl frame_system::Config for Runtime {
 	type Origin = Origin;
-	type Call = ();
+	type Call = Call;
 	type Index = u64;
 	type BlockNumber = u64;
 	type Hash = H256;
@@ -67,20 +41,20 @@ impl frame_system::Config for Runtime {
 	type AccountId = AccountId;
 	type Lookup = IdentityLookup<Self::AccountId>;
 	type Header = Header;
-	type Event = TestEvent;
+	type Event = Event;
 	type BlockHashCount = BlockHashCount;
 	type BlockWeights = ();
 	type BlockLength = ();
 	type Version = ();
-	type PalletInfo = ();
+	type PalletInfo = PalletInfo;
 	type AccountData = ();
 	type OnNewAccount = ();
 	type OnKilledAccount = ();
 	type DbWeight = ();
 	type BaseCallFilter = ();
 	type SystemWeightInfo = ();
+	type SS58Prefix = ();
 }
-pub type System = system::Module<Runtime>;
 
 thread_local! {
 	static TEN_TO_FOURTEEN: RefCell<Vec<AccountId>> = RefCell::new(vec![
@@ -119,20 +93,10 @@ impl ContainsLengthBound for TenToFourteen {
 parameter_types! {
 	pub const ProposalBond: Permill = Permill::from_percent(5);
 	pub const ProposalBondMinimum: u64 = 1;
-	pub const TipCountdown: u64 = 1;
-	pub const TipFindersFee: Percent = Percent::from_percent(20);
-	pub const TipReportDepositBase: u64 = 1;
-	pub const DataDepositPerByte: u64 = 1;
 	pub const SpendPeriod: u64 = 2;
 	pub const Burn: Permill = Permill::from_percent(50);
 	pub const TreasuryModuleId: ModuleId = ModuleId(*b"py/trsry");
 	pub const GetTokenId: CurrencyId = DOT;
-	pub const BountyDepositBase: Balance = 1;
-	pub const BountyDepositPayoutDelay: u64 = 1;
-	pub const BountyUpdatePeriod: u64 = 1;
-	pub const BountyCuratorDeposit: Permill = Permill::from_percent(50);
-	pub const BountyValueMinimum: Balance = 5;
-	pub const MaximumReasonLength: u32 = 16384;
 }
 
 impl pallet_treasury::Config for Runtime {
@@ -140,42 +104,16 @@ impl pallet_treasury::Config for Runtime {
 	type Currency = CurrencyAdapter<Runtime, GetTokenId>;
 	type ApproveOrigin = frame_system::EnsureRoot<AccountId>;
 	type RejectOrigin = frame_system::EnsureRoot<AccountId>;
-	type Event = TestEvent;
+	type Event = Event;
 	type OnSlash = ();
 	type ProposalBond = ProposalBond;
 	type ProposalBondMinimum = ProposalBondMinimum;
 	type SpendPeriod = SpendPeriod;
 	type Burn = Burn;
 	type BurnDestination = ();
-	type SpendFunds = Bounties;
+	type SpendFunds = ();
 	type WeightInfo = ();
 }
-
-impl pallet_bounties::Config for Runtime {
-	type Event = TestEvent;
-	type BountyDepositBase = BountyDepositBase;
-	type BountyDepositPayoutDelay = BountyDepositPayoutDelay;
-	type BountyUpdatePeriod = BountyUpdatePeriod;
-	type BountyCuratorDeposit = BountyCuratorDeposit;
-	type BountyValueMinimum = BountyValueMinimum;
-	type DataDepositPerByte = DataDepositPerByte;
-	type MaximumReasonLength = MaximumReasonLength;
-	type WeightInfo = ();
-}
-
-impl pallet_tips::Config for Runtime {
-	type Event = TestEvent;
-	type DataDepositPerByte = DataDepositPerByte;
-	type MaximumReasonLength = MaximumReasonLength;
-	type Tippers = TenToFourteen;
-	type TipCountdown = TipCountdown;
-	type TipFindersFee = TipFindersFee;
-	type TipReportDepositBase = TipReportDepositBase;
-	type WeightInfo = ();
-}
-
-pub type Treasury = pallet_treasury::Module<Runtime>;
-pub type Bounties = pallet_bounties::Module<Runtime>;
 
 thread_local! {
 	pub static MEMBERS: RefCell<Vec<AccountId>> = RefCell::new(vec![]);
@@ -232,23 +170,25 @@ parameter_types! {
 	pub const DesiredMembers: u32 = 2;
 	pub const DesiredRunnersUp: u32 = 2;
 	pub const TermDuration: u64 = 5;
+	pub const VotingBondBase: u64 = 2;
+	pub const VotingBondFactor: u64 = 0;
 }
 
 impl pallet_elections_phragmen::Config for Runtime {
 	type ModuleId = ElectionsPhragmenModuleId;
-	type Event = TestEvent;
+	type Event = Event;
 	type Currency = CurrencyAdapter<Runtime, GetTokenId>;
 	type CurrencyToVote = SaturatingCurrencyToVote;
 	type ChangeMembers = TestChangeMembers;
 	type InitializeMembers = ();
 	type CandidacyBond = CandidacyBond;
-	type VotingBond = VotingBond;
+	type VotingBondBase = VotingBondBase;
+	type VotingBondFactor = VotingBondFactor;
 	type TermDuration = TermDuration;
 	type DesiredMembers = DesiredMembers;
 	type DesiredRunnersUp = DesiredRunnersUp;
 	type LoserCandidate = ();
 	type KickedMember = ();
-	type BadReport = ();
 	type WeightInfo = ();
 }
 
@@ -267,7 +207,7 @@ parameter_types! {
 }
 
 impl Config for Runtime {
-	type Event = TestEvent;
+	type Event = Event;
 	type Balance = Balance;
 	type Amount = i64;
 	type CurrencyId = CurrencyId;
@@ -275,8 +215,23 @@ impl Config for Runtime {
 	type ExistentialDeposits = ExistentialDeposits;
 	type OnDust = TransferDust<Runtime, DustAccount>;
 }
-pub type Tokens = Module<Runtime>;
 pub type TreasuryCurrencyAdapter = <Runtime as pallet_treasury::Config>::Currency;
+
+type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Runtime>;
+type Block = frame_system::mocking::MockBlock<Runtime>;
+
+construct_runtime!(
+	pub enum Runtime where
+		Block = Block,
+		NodeBlock = Block,
+		UncheckedExtrinsic = UncheckedExtrinsic,
+	{
+		System: frame_system::{Module, Call, Storage, Config, Event<T>},
+		Tokens: tokens::{Module, Storage, Event<T>, Config<T>},
+		Treasury: pallet_treasury::{Module, Call, Storage, Config, Event<T>},
+		ElectionsPhragmen: pallet_elections_phragmen::{Module, Call, Storage, Event<T>},
+	}
+);
 
 pub struct ExtBuilder {
 	endowed_accounts: Vec<(AccountId, CurrencyId, Balance)>,
@@ -312,7 +267,7 @@ impl ExtBuilder {
 			.build_storage::<Runtime>()
 			.unwrap();
 
-		GenesisConfig::<Runtime> {
+		tokens::GenesisConfig::<Runtime> {
 			endowed_accounts: self.endowed_accounts,
 		}
 		.assimilate_storage(&mut t)

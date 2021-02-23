@@ -3,8 +3,8 @@
 #![cfg(test)]
 
 use super::*;
-use frame_support::{assert_noop, assert_ok, error::BadOrigin, traits::WithdrawReasons};
-use mock::{ExtBuilder, Origin, PalletBalances, Runtime, System, TestEvent, Vesting, ALICE, BOB, CHARLIE};
+use frame_support::{assert_noop, assert_ok, error::BadOrigin};
+use mock::{Event, *};
 use pallet_balances::{BalanceLock, Reasons};
 
 #[test]
@@ -67,7 +67,7 @@ fn vested_transfer_works() {
 		assert_ok!(Vesting::vested_transfer(Origin::signed(ALICE), BOB, schedule.clone()));
 		assert_eq!(Vesting::vesting_schedules(&BOB), vec![schedule.clone()]);
 
-		let vested_event = TestEvent::vesting(RawEvent::VestingScheduleAdded(ALICE, BOB, schedule));
+		let vested_event = Event::vesting(crate::Event::VestingScheduleAdded(ALICE, BOB, schedule));
 		assert!(System::events().iter().any(|record| record.event == vested_event));
 	});
 }

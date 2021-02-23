@@ -2,32 +2,14 @@
 
 #![cfg(test)]
 
-use frame_support::{impl_outer_event, impl_outer_origin, parameter_types};
+use super::*;
+use frame_support::{construct_runtime, parameter_types, traits::EnsureOrigin};
 use frame_system::RawOrigin;
-use pallet_balances;
 use sp_core::H256;
 use sp_runtime::{testing::Header, traits::IdentityLookup};
 
-use super::*;
+use crate as vesting;
 
-impl_outer_origin! {
-	pub enum Origin for Runtime {}
-}
-
-mod vesting {
-	pub use crate::Event;
-}
-impl_outer_event! {
-	pub enum TestEvent for Runtime {
-		frame_system<T>,
-		vesting<T>,
-		pallet_balances<T>,
-	}
-}
-
-// Workaround for https://github.com/rust-lang/rust/issues/26925 . Remove when sorted.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct Runtime;
 parameter_types! {
 	pub const BlockHashCount: u64 = 250;
 }
@@ -35,7 +17,7 @@ parameter_types! {
 pub type AccountId = u128;
 impl frame_system::Config for Runtime {
 	type Origin = Origin;
-	type Call = ();
+	type Call = Call;
 	type Index = u64;
 	type BlockNumber = u64;
 	type Hash = H256;
@@ -43,20 +25,20 @@ impl frame_system::Config for Runtime {
 	type AccountId = AccountId;
 	type Lookup = IdentityLookup<Self::AccountId>;
 	type Header = Header;
-	type Event = TestEvent;
+	type Event = Event;
 	type BlockHashCount = BlockHashCount;
 	type BlockWeights = ();
 	type BlockLength = ();
 	type Version = ();
-	type PalletInfo = ();
+	type PalletInfo = PalletInfo;
 	type AccountData = pallet_balances::AccountData<u64>;
 	type OnNewAccount = ();
 	type OnKilledAccount = ();
 	type DbWeight = ();
 	type BaseCallFilter = ();
 	type SystemWeightInfo = ();
+	type SS58Prefix = ();
 }
-pub type System = frame_system::Module<Runtime>;
 
 type Balance = u64;
 
@@ -68,13 +50,12 @@ parameter_types! {
 impl pallet_balances::Config for Runtime {
 	type Balance = Balance;
 	type DustRemoval = ();
-	type Event = TestEvent;
+	type Event = Event;
 	type ExistentialDeposit = ExistentialDeposit;
 	type AccountStore = frame_system::Module<Runtime>;
 	type MaxLocks = ();
 	type WeightInfo = ();
 }
-pub type PalletBalances = pallet_balances::Module<Runtime>;
 
 pub struct EnsureAliceOrBob;
 impl EnsureOrigin<Origin> for EnsureAliceOrBob {
@@ -95,13 +76,27 @@ impl EnsureOrigin<Origin> for EnsureAliceOrBob {
 }
 
 impl Config for Runtime {
-	type Event = TestEvent;
+	type Event = Event;
 	type Currency = PalletBalances;
 	type MinVestedTransfer = MinVestedTransfer;
 	type VestedTransferOrigin = EnsureAliceOrBob;
 	type WeightInfo = ();
 }
-pub type Vesting = Module<Runtime>;
+
+type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Runtime>;
+type Block = frame_system::mocking::MockBlock<Runtime>;
+
+construct_runtime!(
+	pub enum Runtime where
+		Block = Block,
+		NodeBlock = Block,
+		UncheckedExtrinsic = UncheckedExtrinsic,
+	{
+		System: frame_system::{Module, Call, Storage, Config, Event<T>},
+		Vesting: vesting::{Module, Storage, Call, Event<T>, Config<T>},
+		PalletBalances: pallet_balances::{Module, Call, Storage, Config<T>, Event<T>},
+	}
+);
 
 pub const ALICE: AccountId = 1;
 pub const BOB: AccountId = 2;
@@ -122,7 +117,7 @@ impl ExtBuilder {
 		.assimilate_storage(&mut t)
 		.unwrap();
 
-		GenesisConfig::<Runtime> {
+		vesting::GenesisConfig::<Runtime> {
 			vesting: vec![(CHARLIE, 2, 3, 4, 5)], // who, start, period, period_count, per_period
 		}
 		.assimilate_storage(&mut t)
